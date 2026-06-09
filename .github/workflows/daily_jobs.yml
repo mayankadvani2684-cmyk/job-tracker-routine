@@ -1,88 +1,41 @@
-name: Daily LinkedIn Job Scraper
-
-on:
-  schedule:
-    - cron: '30 3 * * *'   # 9:00 AM IST (UTC+5:30) = 03:30 UTC
-  workflow_dispatch:         # lets you trigger manually from GitHub UI
-
-jobs:
-  scrape:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: pip install requests google-auth google-auth-httplib2 google-api-python-client
-
-      - name: Run scraper
+- name: Email Excel to yourself
         env:
-          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
-        run: python run_jobs.py
-
-      - name: Upload Excel to Google Drive
-        env:
-          GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          TO_EMAIL: ${{ secrets.GMAIL_USER }}
         run: |
           python - <<'EOF'
-          import os, json, glob
-          from googleapiclient.discovery import build
-          from googleapiclient.http import MediaFileUpload
-          from google.oauth2.service_account import Credentials
+          import os, glob, smtplib
+          from email.mime.multipart import MIMEMultipart
+          from email.mime.base import MIMEBase
+          from email.mime.text import MIMEText
+          from email import encoders
+          from datetime import date
 
-          # Load service account credentials from secret
-          creds_json = json.loads(os.environ["GDRIVE_CREDENTIALS"])
-          creds = Credentials.from_service_account_info(
-              creds_json,
-              scopes=["https://www.googleapis.com/auth/drive.file"]
-          )
-          service = build("drive", "v3", credentials=creds)
-
-          # Find today's Excel file
           files = glob.glob("LinkedIn_Jobs_*.xlsx")
           if not files:
-              print("No Excel file found — scraper may have produced no results")
+              print("No Excel file found — skipping email")
               exit(0)
 
-          filepath = sorted(files)[-1]   # latest file if multiple
+          filepath = sorted(files)[-1]
           filename = os.path.basename(filepath)
-          print(f"Uploading: {filename}  ({os.path.getsize(filepath):,} bytes)")
 
-          # Check if file already exists in Drive root — update it if so
-          existing = service.files().list(
-              q=f"name='{filename}' and '16kpYhXwL-bAKryYeNVNDgQhpWK3FiAF4' in parents and trashed=false",
-              fields="files(id, name)"
-          ).execute().get("files", [])
+          msg = MIMEMultipart()
+          msg["From"]    = os.environ["GMAIL_USER"]
+          msg["To"]      = os.environ["TO_EMAIL"]
+          msg["Subject"] = f"LinkedIn Jobs — {date.today().strftime('%d %b %Y')}"
 
-          media = MediaFileUpload(
-              filepath,
-              mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-              resumable=True
-          )
+          msg.attach(MIMEText(f"Daily job tracker attached — {filename}", "plain"))
 
-          if existing:
-              file_id = existing[0]["id"]
-              service.files().update(fileId=file_id, media_body=media).execute()
-              print(f"Updated existing Drive file: {file_id}")
-          else:
-              meta = {"name": filename, "parents": ["16kpYhXwL-bAKryYeNVNDgQhpWK3FiAF4"]}
-              result = service.files().create(
-                  body=meta, media_body=media, fields="id"
-              ).execute()
-              print(f"Created new Drive file: {result['id']}")
+          with open(filepath, "rb") as f:
+              part = MIMEBase("application", "octet-stream")
+              part.set_payload(f.read())
+          encoders.encode_base64(part)
+          part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+          msg.attach(part)
+
+          with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+              server.login(os.environ["GMAIL_USER"], os.environ["GMAIL_APP_PASSWORD"])
+              server.send_message(msg)
+              print(f"Email sent: {filename}")
           EOF
-
-      - name: Commit Excel to repo (backup)
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add LinkedIn_Jobs_*.xlsx || true
-          git diff --staged --quiet || git commit -m "Daily jobs: $(date +'%Y-%m-%d')"
-          git push || true
