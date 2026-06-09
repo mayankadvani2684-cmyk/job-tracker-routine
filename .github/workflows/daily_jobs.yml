@@ -57,7 +57,7 @@ jobs:
 
           # Check if file already exists in Drive root — update it if so
           existing = service.files().list(
-              q=f"name='{filename}' and 'root' in parents and trashed=false",
+              q=f"name='{filename}' and '16kpYhXwL-bAKryYeNVNDgQhpWK3FiAF4' in parents and trashed=false",
               fields="files(id, name)"
           ).execute().get("files", [])
 
@@ -72,7 +72,7 @@ jobs:
               service.files().update(fileId=file_id, media_body=media).execute()
               print(f"Updated existing Drive file: {file_id}")
           else:
-              meta = {"name": filename, "parents": ["root"]}
+              meta = {"name": filename, "parents": ["16kpYhXwL-bAKryYeNVNDgQhpWK3FiAF4"]}
               result = service.files().create(
                   body=meta, media_body=media, fields="id"
               ).execute()
