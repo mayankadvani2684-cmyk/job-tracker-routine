@@ -16,7 +16,7 @@ ACTOR_ID    = "curious_coder~linkedin-jobs-scraper"
 COUNT       = 75
 TODAY       = date.today()
 FILENAME    = f"LinkedIn_Jobs_{TODAY.strftime('%Y-%m-%d')}.xlsx"
-OUTPUT_PATH = f"/home/user/job-tracker-routine/{FILENAME}"
+OUTPUT_PATH = FILENAME
 
 SEARCH_URLS = [
     "https://www.linkedin.com/jobs/search/?keywords=FP%26A%20analyst&location=Mumbai%2C%20Maharashtra%2C%20India&f_TPR=r86400",
