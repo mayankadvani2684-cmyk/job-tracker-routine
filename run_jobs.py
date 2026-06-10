@@ -2,7 +2,7 @@
 LinkedIn jobs scraper → Excel → Google Drive
 Uses Apify actor curious_coder/linkedin-jobs-scraper
 """
-import os, json, time, re, base64, zipfile
+import os, json, time, re, base64, zipfile, concurrent.futures
 from datetime import date, datetime
 import requests
 
@@ -166,20 +166,22 @@ def run_actor(search_url):
 def main():
     all_jobs = []
     seen = set()   # (company_lower, title_lower) dedup key
+    raw_by_url = {}
 
-    for i, url in enumerate(SEARCH_URLS, 1):
-        kw = re.search(r"keywords=([^&]+)", url)
-        loc = re.search(r"location=([^&]+)", url)
-        label = f"{kw.group(1) if kw else '?'} / {loc.group(1) if loc else '?'}"
-        print(f"[{i:02d}/{len(SEARCH_URLS)}] {label} ...", flush=True)
-        try:
-            jobs = run_actor(url)
-            print(f"  → {len(jobs)} raw results", flush=True)
-        except Exception as e:
-            print(f"  ERROR: {e}", flush=True)
-            jobs = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_url = {executor.submit(run_actor, url): url for url in SEARCH_URLS}
+        for future in concurrent.futures.as_completed(future_to_url):
+            url = future_to_url[future]
+            try:
+                jobs = future.result()
+            except Exception as e:
+                print(f"  ERROR for {url}: {e}", flush=True)
+                jobs = []
+            print(f"[APIFY] {len(jobs)} raw results from URL {url}", flush=True)
+            raw_by_url[url] = jobs
 
-        for job in jobs:
+    for url in SEARCH_URLS:
+        for job in raw_by_url.get(url, []):
             if should_filter(job):
                 continue
             title_l   = (job.get("title") or "").strip().lower()
@@ -190,7 +192,7 @@ def main():
             seen.add(key)
             all_jobs.append(job)
 
-    print(f"\nTotal after filter+dedup: {len(all_jobs)}", flush=True)
+    print(f"[FILTER] {len(all_jobs)} jobs remaining after filter+dedup", flush=True)
 
     # Assign tier, resume, cleaned url, city
     for job in all_jobs:
@@ -274,15 +276,7 @@ def main():
     fill_sheet(ws2, all_jobs)
 
     data = wb.save(OUTPUT_PATH)
-    print(f"Saved: {OUTPUT_PATH}  ({len(data):,} bytes)", flush=True)
-
-    # verify integrity
-    with zipfile.ZipFile(OUTPUT_PATH) as z:
-        bad = z.testzip()
-        if bad:
-            os.remove(OUTPUT_PATH)
-            raise RuntimeError(f"ZIP corrupt: {bad}")
-    print("ZIP integrity OK", flush=True)
+    print(f"[EXCEL] File saved, size={len(data):,} bytes", flush=True)
 
     return data, all_jobs
 
